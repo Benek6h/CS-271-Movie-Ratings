@@ -1,10 +1,11 @@
 import pandas as pd
 import numpy as np
 import networkx as nx
-from sklearn.model_selection import train_test_split
 import xgboost as xgb
 from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import KFold
 import matplotlib.pyplot as plt
+from sklearn.metrics import roc_auc_score, f1_score, roc_curve
 
 # Load and pre-process data ---------------------------------------------------------------------
 # Ratings: user_id, movie_id, rating, timestamp
@@ -105,30 +106,65 @@ for row in df.itertuples(index=False):
 X = np.array(X)
 y = np.array(y)
 
-# Split data, train model, and make prediction---------------------------------------------------------------------
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
 
-# Using Random Forest, but I would probably suggest to swap to something that uses tabular data wekk like XGBoost
-# Random forest output is aight, not the best
+kfold = KFold(n_splits=5, shuffle=True)
+scores = []
 
-# changed to XGBoost
-# TODO: Implement max_cat_to_onehot for better prediction
-model = xgb.XGBRegressor(objective='reg:squarederror', n_estimators=100, learning_rate=0.01, max_depth=2, colsample_bytree=1, gamma=0, seed=100)
+# Regression Model
+for train_index, test_index in kfold.split(X):
+    X_train, X_test = X[train_index], X[test_index]
+    y_train, y_test = y[train_index], y[test_index]
 
-# Train the model on training data
-model.fit(X_train, y_train)
+    model = xgb.XGBRegressor(objective='reg:squarederror', n_estimators=100, learning_rate=0.01, max_depth=2,
+                             colsample_bytree=1, gamma=0)
 
-# Predict on the test set
-y_pred = model.predict(X_test)
+    # Train the model on training data
+    model.fit(X_train, y_train)
 
-# Model evaulation---------------------------------------------------------------------
-# Evaulation is made using RMSE
-rmse = mean_squared_error(y_test, y_pred)
-print("Test RMSE:", rmse)
+
+    # Predict on the test set
+    y_pred = model.predict(X_test)
+
+    # Model evaulation---------------------------------------------------------------------
+    # Evaulation is made using RMSE
+    rmse = mean_squared_error(y_test, y_pred)
+    scores.append(rmse)
+
+for i in range(0, len(scores)):
+    print(f"Prediction RMSE - model_{i}: {scores[i]:.2f}")
+
+# Classification Model
+kfold_classification = KFold(n_splits=5, shuffle=True)
+scores_f1 = []
+scores_roc = []
+y= y-1
+
+for train_index, test_index in kfold_classification.split(X):
+    X_train, X_test = X[train_index], X[test_index]
+    y_train, y_test = y[train_index], y[test_index]
+
+    model = xgb.XGBClassifier(objective='multi:softprob', num_class=5, n_estimators=500, learning_rate=0.02, max_depth=8,
+                             colsample_bytree=0.8, gamma=0.2)
+
+    # Train the model on training data
+    model.fit(X_train, y_train)
+
+    # Predict on the test set
+    y_pred_roc = model.predict_proba(X_test)
+    y_pred = model.predict(X_test)
+
+    scores_f1.append(f1_score(y_test, y_pred, average="macro"))
+    scores_roc.append(roc_auc_score(y_test, y_pred_roc, average="macro", multi_class="ovr"))
+
+for i in range(0, len(scores_f1)):
+    print(f"ROC-score - model_{i}: {scores_roc[i]:.2f}")
+
+for i in range(0, len(scores_f1)):
+    print(f"F1-score - model_{i}: {scores_f1[i]:.2f}")
 
 # Make graph from a smal subset of the data (bipartide graph)------------------------------
 # Get a subset size that is <= 1 million
-subset_size = 20
+subset_size = 100
 
 # Use prefix user id's to grab the correct nodes
 subset_users = [f"U_{uid}" for uid in list(user_nodes)[:subset_size]]
